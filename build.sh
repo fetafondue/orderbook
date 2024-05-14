@@ -1,4 +1,4 @@
 #!/bin/zsh
 #+ Command to compile c++ program
-g++ -std=c++20 OrderBook.cpp -o OrderBook
+g++-14 -std=c++23 -o main main.cpp OrderBook.cpp
 exit 0
