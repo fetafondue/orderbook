@@ -1,6 +1,9 @@
 # Order book
 This is my implementation of an order book.
 
+# Technical specifications
+- Compiled with g++-14 (installed with Homebrew), using C++23
+
 # Coding semantics
 1. Member functions are named with an underscore suffix
 2. Accessors return const ref only for non primitive objects
