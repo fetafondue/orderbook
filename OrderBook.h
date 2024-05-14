@@ -3,6 +3,7 @@
 
 #include <map>
 #include <unordered_map>
+#include <thread>
 
 #include "Trade.h"
 #include "Order.h"
@@ -14,8 +15,8 @@ class OrderBook
 public:
     
     Trades AddOrder(OrderPointer order);
-    void CancelOrder(OrderId orderId);
     Trades MatchOrder(OrderModify order);
+    void CancelOrder(OrderId orderId);
     
     std::size_t Size() const;
     OrderBookLevelInfos GetOrderInfos() const;
@@ -32,6 +33,15 @@ private:
     // ascending order from best to worst ask
     std::map<Price, OrderPointers, std::less<Price>> asks_;
     std::unordered_map<OrderId, OrderEntry> orders_;
+    mutable std::mutex ordersMutex_;
+    std::thread ordersPruneThread;
+    std::condition_variable shutdownConditionVariable_;
+    std::atomic<bool> shutdown_ { false };
+    
+    void PruneGoodForDayOrders();
+    
+    void CancelOrders(OrderIds orderIds);
+    void CancelOrderInternal(OrderId orderId);
     
     bool CanMatch(Side side, Price price) const;
     Trades MatchOrders();

@@ -2,11 +2,110 @@
 
 #include "OrderBook.h"
 
+void OrderBook::PruneGoodForDayOrders()
+{
+    using namespace std::chrono;
+    const auto end = hours(16);
+    
+    while (true)
+    {
+        const auto now = system_clock::now();
+        const auto now_c = system_clock::to_time_t(now);
+        std::tm now_parts;
+        localtime_r(&now_c, &now_parts);
+        
+        if (now_parts.tm_hour >= end.count())
+            now_parts.tm_mday += 1;
+        
+        now_parts.tm_hour = end.count();
+        now_parts.tm_min = 0;
+        now_parts.tm_sec = 0;
+        
+        auto next = system_clock::from_time_t(mktime(&now_parts));
+        auto till = next - now + milliseconds(100); // 100ms as a buffer
+        
+        {
+            std::unique_lock orderLock { ordersMutex_ }; // prevent accessing of orders if its being used by main thread
+            
+            if (shutdown_.load(std::memory_order_acquire) || shutdownConditionVariable_.wait_for(orderLock, till) == std::cv_status::no_timeout)
+                return;
+        }
+        
+        OrderIds orderIds;
+        
+        {
+            std::scoped_lock orderLock { ordersMutex_ };
+            
+            for (const auto& [_, entry] : orders_)
+            {
+                const auto& [order, _] = entry;
+                
+                if (order->GetOrderType() != OrderType::GoodForDay)
+                    continue;
+                
+                orderIds.push_back(order->GetOrderId());
+            }
+        }
+        
+        CancelOrders(orderIds);
+    }
+}
+
+void OrderBook::CancelOrders(OrderIds orderIds)
+{
+    std::scoped_lock orderLock { ordersMutex_ };
+    
+    for (const auto& orderId : orderIds)
+        CancelOrderInternal(orderId);
+}
+
+void OrderBook::CancelOrderInternal(OrderId orderId)
+{
+    if (!orders_.contains(orderId))
+        return;
+    
+    const auto [order, iter] = orders_.at(orderId);
+    orders_.erase(orderId);
+    
+    if (order->GetSide() == Side::Sell)
+    {
+        auto price = order->GetPrice();
+        auto& orders = asks_.at(price);
+        orders.erase(iter);
+        if (orders.empty())
+            asks_.erase(price);
+    }
+    else
+    {
+        auto price = order->GetPrice();
+        auto& orders = bids_.at(price);
+        orders.erase(iter);
+        if (orders.empty())
+            bids_.erase(price);
+    }
+}
+
 Trades OrderBook::AddOrder(OrderPointer order)
 {
     // cannot add order if the orderId already exists
     if (orders_.contains(order->GetOrderId()))
         return {};
+        
+    if (order->GetOrderType() == OrderType::Market)
+    {
+        if (order->GetSide() == Side::Buy && !asks_.empty())
+        {
+            const auto& [worstAsk, _] = *asks_.end();
+            order->ToGoodTillCancel(worstAsk);
+        }
+        else if (order->GetSide() == Side::Sell && !bids_.empty())
+        {
+            const auto& [worstBid, _] = *bids_.end();
+            order->ToGoodTillCancel(worstBid);
+        }
+        else
+            return {};
+    }
     
     if (order->GetOrderType() == OrderType::FillAndKill && !CanMatch(order->GetSide(), order->GetPrice()))
         return {};

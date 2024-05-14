@@ -3,6 +3,7 @@ This is my implementation of an order book.
 
 # Technical specifications
 - Compiled with g++-14 (installed with Homebrew), using C++23
+- Run `./build.sh` to compile, `./main` to run
 
 # Coding semantics
 1. Member functions are named with an underscore suffix
@@ -39,3 +40,19 @@ Bids within the order book is implemented as a map of price to list of orders. T
 
 ### Asks
 Likewise, asks within the order book is implemented as a map of price to list of orders. This map is in ascending order as the lowest ask is the best ask. We always will the lowest price ask first, and if asks are the same price then it is on a first come first served basis.
+
+# Order types
+## GoodTillCancel
+Order stays until the user cancels it manually.
+
+## FillAndKill
+Fill as much as you can with the given price, then once the order book is unable to fulfill anymore quantity, kill the order.
+
+## FillOrKill
+Order can only be completely filled (no partial filling).
+
+## Market
+Buy/sell at any price (fill as much quantity as I can). As such, it makes sense to clear the worst asks/bids here.
+
+## GoodForDay
+GoodTillCancel order that is cancelled by the exchange at the end of the day.
