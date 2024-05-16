@@ -30,6 +30,20 @@ private:
         OrderPointers::iterator location_;
     };
     
+    struct LevelData
+    {
+        Quantity quantity_{};
+        Quantity count_{};
+        
+        enum class Action
+        {
+            Add,
+            Remove,
+            Match,
+        };
+    };
+    
+    std::unordered_map<Price, LevelData> metadata_;
     // descending order from best to worst bid
     std::map<Price, OrderPointers, std::greater<Price>> bids_;
     // ascending order from best to worst ask
@@ -42,9 +56,17 @@ private:
     
     void PruneGoodForDayOrders();
     
+    // wrapper function to obtain mutex before loop
     void CancelOrders(OrderIds orderIds);
     void CancelOrderInternal(OrderId orderId);
     
+    void OnOrderCancelled(OrderPointer order);
+    void OnOrderAdded(OrderPointer order);
+    void OnOrderMatched(Price price, Quantity quantity, bool isFullyFilled);
+    void UpdateLevelData(Price price, Quantity quantity, LevelData::Action action);
+    
+    // used for FillOrKill orders, checks if the quantity between the order price and the best ask/bid is enough to fully fill the order
+    bool CanFullyFill(Side side, Price price, Quantity quantity) const;
     bool CanMatch(Side side, Price price) const;
     Trades MatchOrders();
 };

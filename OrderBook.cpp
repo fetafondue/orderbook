@@ -83,6 +83,8 @@ void OrderBook::CancelOrderInternal(OrderId orderId)
         if (orders.empty())
             bids_.erase(price);
     }
+    
+    OnOrderCancelled(order);
 }
 
 Trades OrderBook::AddOrder(OrderPointer order)
@@ -110,6 +112,9 @@ Trades OrderBook::AddOrder(OrderPointer order)
     if (order->GetOrderType() == OrderType::FillAndKill && !CanMatch(order->GetSide(), order->GetPrice()))
         return {};
         
+    if (order->GetOrderType() == OrderType::FillOrKill && !CanFullyFill(order->GetSide(), order->GetPrice(), order->GetInitialQuantity()))
+		return {};
+        
     OrderPointers::iterator iter;
     
     if (order->GetSide() == Side::Buy)
@@ -126,6 +131,8 @@ Trades OrderBook::AddOrder(OrderPointer order)
     }
     
     orders_.insert({order->GetOrderId(), OrderEntry{ order, iter }});
+    
+    OnOrderAdded(order);
     
     return MatchOrders();
 }
@@ -154,6 +161,79 @@ void OrderBook::CancelOrder(OrderId orderId)
         if (orders.empty())
             bids_.erase(price);
     }
+}
+
+void OrderBook::OnOrderAdded(OrderPointer order)
+{
+    UpdateLevelData(order->GetPrice(), order->GetRemainingQuantity(), LevelData::Action::Add);
+}
+
+void OrderBook::OnOrderCancelled(OrderPointer order)
+{
+    UpdateLevelData(order->GetPrice(), order->GetRemainingQuantity(), LevelData::Action::Remove);
+}
+
+void OrderBook::OnOrderMatched(Price price, Quantity quantity, bool isFullyFilled)
+{
+    UpdateLevelData(price, quantity, isFullyFilled ? LevelData::Action::Remove : LevelData::Action::Match);
+}
+
+void OrderBook::UpdateLevelData(Price price, Quantity quantity, LevelData::Action action)
+{
+    auto& levelData = metadata_[price];
+    
+    levelData.count_ += (action == LevelData::Action::Add) ? 1 : (action == LevelData::Action::Remove) ? -1 : 0;
+    if (action == LevelData::Action::Remove || action == LevelData::Action::Match)
+    {
+        levelData.quantity_ -= quantity;
+    }
+    else
+    {
+        levelData.quantity_ += quantity;
+    }
+    
+    if (levelData.count_ == 0)
+        metadata_.erase(price);
+}
+
+bool OrderBook::CanFullyFill(Side side, Price price, Quantity quantity) const
+{
+    if (!CanMatch(side, price))
+        return false;
+        
+    std::optional<Price> threshold;
+    
+    if (side == Side::Buy)
+    {
+        const auto [askPrice, _] = *asks_.begin();
+        threshold = askPrice;
+    }
+    else
+    {
+        const auto [bidPrice, _] = *bids_.begin();
+        threshold = bidPrice;
+    }
+    
+    for (const auto& [levelPrice, levelData] : metadata_)
+    {
+        if (threshold.has_value() &&
+            (side == Side::Buy && threshold.value() > levelPrice) ||
+            (side == Side::Sell && threshold.value() < levelPrice))
+            continue;
+            
+        if ((side == Side::Buy && threshold.value() > levelPrice) || 
+            (side == Side::Sell && threshold.value() < levelPrice))
+            continue;
+            
+        if (quantity <= levelData.quantity_)
+        {
+            return true;
+        }
+            
+        quantity -= levelData.quantity_;
+    }
+    
+    return false;
 }
 
 Trades OrderBook::MatchOrder(OrderModify order)
@@ -260,6 +340,9 @@ Trades OrderBook::MatchOrders()
                 TradeInfo { bid->GetOrderId(), bid->GetPrice(), quantity },
                 TradeInfo { ask->GetOrderId(), ask->GetPrice(), quantity }
             });
+            
+            OnOrderMatched(bid->GetPrice(), quantity, bid->IsFilled());
+			OnOrderMatched(ask->GetPrice(), quantity, ask->IsFilled());
         }
     }
     
