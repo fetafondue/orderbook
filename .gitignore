@@ -33,3 +33,6 @@
 
 # VScode
 *.vscode
+
+# Test
+tests/test
